@@ -1,4 +1,4 @@
-<!DOCT<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
@@ -16,6 +16,7 @@
     input, select, textarea, button { width:100%; font-size:16px; padding:10px 12px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box }
     textarea { min-height:96px }
     button { background:#f7b500; color:#fff; border:none; cursor:pointer }
+    button[disabled] { opacity:.6; cursor:not-allowed }
     button:hover { background:#e09e00 }
     .row { display:grid; grid-template-columns:1fr 1fr; gap:12px }
     .button-row { display:flex; gap:12px; justify-content:space-between }
@@ -93,6 +94,7 @@
       <p id="status" class="muted">尚未送出</p>
       <div class="row">
         <button id="send-sheets">送出作答</button>
+        <button id="restart-btn" style="display:none; background:#666">重新作答</button>
       </div>
     </section>
   </main>
@@ -131,6 +133,7 @@
     let orderSeq = '';
     let tIndex = 0;              // 0..5
     let tStartAt = 0;            // 題目開始時間戳
+    let hasSubmitted = false;    // ★ 防止重複上傳
 
     // ==== 工具 ====
     const $ = s => document.querySelector(s);
@@ -159,6 +162,7 @@
 
       $('#finish-btn').onclick = finishSurvey;
       $('#send-sheets').onclick = sendToSheets;
+      $('#restart-btn').onclick = () => { location.reload(); };
     });
 
     function startExp(){
@@ -256,9 +260,14 @@
 
     // ==== 上傳至 Google 試算表（Apps Script Web App）====
     async function sendToSheets(){
+      if (hasSubmitted) return;          // ★ 已送出就不再重送
+      const btn = $('#send-sheets');
+      btn.disabled = true;               // ★ 立刻禁用，避免連點
+      btn.textContent = '傳送中…';
+
       const url = CONFIG.WEBAPP_URL.trim();
       const secret = CONFIG.SECRET.trim();
-      if (!url) { alert('系統設定不完整：缺少 Web App URL'); return; }
+      if (!url) { alert('系統設定不完整：缺少 Web App URL'); btn.disabled=false; btn.textContent='送出作答'; return; }
 
       const payload = {
         secret,
@@ -278,11 +287,18 @@
         try { json = JSON.parse(text); } catch(_) { json = { ok: res.ok, raw: text }; }
         if ((json && json.ok) || res.ok) {
           const c = json.counts || {};
+          hasSubmitted = true;                                 // ★ 標記已送出
+          btn.textContent = '已送出（完成）';                  // ★ 改成完成
+          $('#restart-btn').style.display = 'block';           // ★ 顯示重新作答
           $('#status').innerHTML = `已送出作答，感謝參與！<br>（系統紀錄：participants=${c.participants||0}, trials=${c.trials||0}, surveys=${c.surveys||0}）`;
         } else {
+          btn.disabled = false;                                // 還原讓受試者可再試
+          btn.textContent = '送出作答';
           $('#status').textContent = '送出失敗：' + (json && json.message || text || '未知錯誤');
         }
       } catch (e) {
+        btn.disabled = false;                                  // 還原
+        btn.textContent = '送出作答';
         console.error(e); $('#status').textContent = '送出失敗（可能是網路或權限）。錯誤：'+e.message;
       }
     }
