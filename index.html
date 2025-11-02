@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>圖表理解與使用感受問卷（Google 試算表版）</title>
+  <title>圖表理解與使用感受問卷（Google 試算表版｜FormData 送出）</title>
   <style>
     body { font-family: "Microsoft JhengHei", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin:0; background:#fafafa; color:#333 }
     header { background:#f7b500; color:#fff; padding:16px 12px; text-align:center }
@@ -57,7 +57,7 @@
       </div>
       <div class="callout">
         <b>管理者設定（給主試者用）：</b>
-        <label>Google Apps Script Web App URL（部署後複製貼上）<input id="webapp-url" placeholder="https://script.google.com/macros/s/AKfycbx9ikfl1kVFhTlmzCFzdDFiMWFA1piSsyxCed4hTDXp2f40Qcqmhh3CDUXUEb7cYs5j/exec" /></label>
+        <label>Google Apps Script Web App URL（部署後複製貼上）<input id="webapp-url" placeholder="https://script.google.com/macros/s/XXXX/exec" /></label>
         <label>安全 Token（與 GAS 端一致，建議自訂）<input id="secret" placeholder="mys3cret123" /></label>
         <p class="muted">若不填，仍可照常完成實驗，最後僅提供 CSV 下載。</p>
       </div>
@@ -105,7 +105,7 @@
         <button id="download-trials">下載 trials.csv</button>
         <button id="download-surveys">下載 surveys.csv</button>
       </div>
-      <p class="muted">提示：若出現跨網域錯誤，請確認你的 GAS 已部署為「任何人皆可存取」並允許跨網域。</p>
+      <p class="muted">若出現跨網域錯誤，請確認：1) 使用 /exec、2) 部署對象為「任何人」、3) 已改為 FormData 送出（本頁已內建）。</p>
     </section>
   </main>
 
@@ -190,7 +190,6 @@
       const seq = orderSeq.split('-');
       const all = [];
       seq.forEach(c => TASKS[c].forEach(t => all.push({ chart:c, ...t })));
-      // 擇二（P 類保留 B2/C2；上方已只放兩題）
       trials = all.slice(0,6);
       tIndex = 0;
       showTrial();
@@ -287,22 +286,29 @@
     }
 
     // ==== 上傳至 Google 試算表（Apps Script Web App） ====
+    // 改為 FormData，避免 application/json 造成 CORS 預檢（OPTIONS）
     async function sendToSheets(){
       const url = $('#webapp-url').value.trim();
       const secret = $('#secret').value.trim();
-      if (!url) { alert('請先貼上 Google Apps Script Web App URL'); return; }
+      if (!url) { alert('請先貼上 Google Apps Script Web App URL（/exec）'); return; }
+
       const payload = {
         secret,
         participants: [{ pid:participant.pid, age:+participant.age, gender:participant.gender, order_seq:participant.order_seq, device:participant.device, start_time:participant.start_time }],
         trials: trials.map((t,i)=>({ pid:participant.pid, trial_index:i+1, chart_type:t.chart, task_id:t.id, response:t.response, correct_answer:t.correct_answer, accuracy:t.accuracy, rt_ms:t.rt_ms })),
         surveys: surveys
       };
+
       try {
         $('#status').textContent = '傳送中…';
-        const res = await fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload), mode:'cors' });
-        const json = await res.json();
-        if (json && json.ok) { $('#status').innerHTML = '已送出到 Google 試算表。<span class="success">成功</span>'; }
-        else { $('#status').textContent = '送出失敗：'+(json && json.message || '未知錯誤'); }
+        const fd = new FormData();
+        fd.append('payload', JSON.stringify(payload));
+        const res = await fetch(url, { method:'POST', body: fd });
+        const text = await res.text();
+        let json = {};
+        try { json = JSON.parse(text); } catch(_) { json = { ok: res.ok, raw: text }; }
+        if ((json && json.ok) || res.ok) { $('#status').innerHTML = '已送出到 Google 試算表。<span class="success">成功</span>'; }
+        else { $('#status').textContent = '送出失敗：'+(json && json.message || text || '未知錯誤'); }
       } catch (e) {
         console.error(e); $('#status').textContent = '送出失敗（可能是 CORS 或權限）。錯誤：'+e.message;
       }
