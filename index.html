@@ -55,12 +55,6 @@
         </label>
         <label class="muted">裝置資訊（自動偵測）<input id="device" disabled /></label>
       </div>
-      <div class="callout">
-        <b>管理者設定（給主試者用）：</b>
-        <label>Google Apps Script Web App URL（部署後複製貼上）<input id="webapp-url" placeholder="https://script.google.com/macros/s/XXXX/exec" /></label>
-        <label>安全 Token（與 GAS 端一致，建議自訂）<input id="secret" placeholder="mys3cret123" /></label>
-        <p class="muted">若不填，仍可照常完成實驗，最後僅提供 CSV 下載。</p>
-      </div>
       <button id="start-btn">我了解並開始</button>
     </section>
 
@@ -110,6 +104,13 @@
   </main>
 
   <dialog id="img-dialog"><img id="dialog-img" /></dialog>
+<script>
+  // ====== 管理者常數設定（不顯示給受試者）======
+  const CONFIG = {
+    WEBAPP_URL: 'https://script.google.com/macros/s/AKfycbx9ikfl1kVFhTlmzCFzdDFiMWFA1piSsyxCed4hTDXp2f40Qcqmhh3CDUXUEb7cYs5j/exec', // ← 換成你的 /exec
+    SECRET: 'mys3cret123',                                            // ← 跟 GAS 的 SECRET_TOKEN 一樣
+    ALLOW_ADMIN_PANEL: false                                          // 若改成 true 或網址加 ?admin=1 才會顯示管理者設定
+  };
 
   <script>
     // ==== 常數設定 ====
@@ -287,31 +288,39 @@
 
     // ==== 上傳至 Google 試算表（Apps Script Web App） ====
     // 改為 FormData，避免 application/json 造成 CORS 預檢（OPTIONS）
-    async function sendToSheets(){
-      const url = $('#webapp-url').value.trim();
-      const secret = $('#secret').value.trim();
-      if (!url) { alert('請先貼上 Google Apps Script Web App URL（/exec）'); return; }
+async function sendToSheets(){
+  const url = CONFIG.WEBAPP_URL.trim();
+  const secret = CONFIG.SECRET.trim();
+  if (!url) { alert('尚未設定 Web App URL'); return; }
 
-      const payload = {
-        secret,
-        participants: [{ pid:participant.pid, age:+participant.age, gender:participant.gender, order_seq:participant.order_seq, device:participant.device, start_time:participant.start_time }],
-        trials: trials.map((t,i)=>({ pid:participant.pid, trial_index:i+1, chart_type:t.chart, task_id:t.id, response:t.response, correct_answer:t.correct_answer, accuracy:t.accuracy, rt_ms:t.rt_ms })),
-        surveys: surveys
-      };
+  const payload = {
+    secret,
+    origin: window.location.origin,  // ← 送給後端做來源驗證（下一節會教）
+    participants: [{ pid:participant.pid, age:+participant.age, gender:participant.gender, order_seq:participant.order_seq, device:participant.device, start_time:participant.start_time }],
+    trials: trials.map((t,i)=>({ pid:participant.pid, trial_index:i+1, chart_type:t.chart, task_id:t.id, response:t.response, correct_answer:t.correct_answer, accuracy:t.accuracy, rt_ms:t.rt_ms })),
+    surveys: surveys
+  };
 
-      try {
-        $('#status').textContent = '傳送中…';
-        const fd = new FormData();
-        fd.append('payload', JSON.stringify(payload));
-        const res = await fetch(url, { method:'POST', body: fd });
-        const text = await res.text();
-        let json = {};
-        try { json = JSON.parse(text); } catch(_) { json = { ok: res.ok, raw: text }; }
-        if ((json && json.ok) || res.ok) { $('#status').innerHTML = '已送出到 Google 試算表。<span class="success">成功</span>'; }
-        else { $('#status').textContent = '送出失敗：'+(json && json.message || text || '未知錯誤'); }
-      } catch (e) {
-        console.error(e); $('#status').textContent = '送出失敗（可能是 CORS 或權限）。錯誤：'+e.message;
-      }
+  // 建議：用 FormData 避開 CORS 預檢；若你目前用 application/json 也可
+  try {
+    $('#status').textContent = '傳送中…';
+    const fd = new FormData();
+    fd.append('payload', JSON.stringify(payload));
+    const res = await fetch(url, { method:'POST', body: fd });
+    const text = await res.text();
+    let json = {};
+    try { json = JSON.parse(text); } catch(_) { json = { ok: res.ok, raw: text }; }
+    if ((json && json.ok) || res.ok) {
+      const link = json.sheetUrl ? ` → <a href="${json.sheetUrl}" target="_blank">開啟試算表</a>` : '';
+      const c = json.counts || {};
+      $('#status').innerHTML = `已送出到 Google 試算表。<span class="success">成功</span>${link}<br>寫入筆數：participants=${c.participants||0}, trials=${c.trials||0}, surveys=${c.surveys||0}`;
+    } else {
+      $('#status').textContent = '送出失敗：' + (json && json.message || text || '未知錯誤');
+    }
+  } catch (e) {
+    console.error(e); $('#status').textContent = '送出失敗（可能是 CORS 或權限）。錯誤：'+e.message;
+  }
+}
     }
   </script>
 </body>
