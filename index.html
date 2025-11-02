@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCT<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
@@ -35,12 +35,12 @@
 <body>
   <header>
     <h1>圖表理解與使用感受問卷</h1>
-    <nav id="breadcrumb">資料 → 作答 → 問卷 → 送出/下載</nav>
+    <nav id="breadcrumb">資料 → 作答 → 問卷 → 送出</nav>
   </header>
   <main>
     <section id="conf-section" class="active">
       <h2>1) 目標與資料授權</h2>
-      <p class="callout">此頁面會在本機紀錄你的作答，完成後可「下載 CSV」或「送到 Google 試算表」。送出後不會收集個資，僅包含你輸入的 pid、年齡、性別與作答內容。</p>
+      <p class="callout">此頁面會在本機紀錄你的作答，完成後由系統送到研究團隊的試算表。送出後不會收集個資，僅包含你輸入的 pid、年齡、性別與作答內容。</p>
       <div class="row">
         <label>（可留空自動產生）參與者編號 pid<input id="pid" placeholder="例如：P01" /></label>
         <label>年齡<input id="age" type="number" min="18" max="99" /></label>
@@ -89,17 +89,11 @@
     </section>
 
     <section id="done-section">
-      <h2>4) 送出/下載</h2>
+      <h2>4) 送出</h2>
       <p id="status" class="muted">尚未送出</p>
       <div class="row">
-        <button id="send-sheets">送到 Google 試算表</button>
-        <button id="download-participants">下載 participants.csv</button>
+        <button id="send-sheets">送出作答</button>
       </div>
-      <div class="row">
-        <button id="download-trials">下載 trials.csv</button>
-        <button id="download-surveys">下載 surveys.csv</button>
-      </div>
-      <p class="muted">若出現跨網域錯誤，請確認：1) 使用 /exec、2) 部署對象為「任何人」、3) 已改為 FormData 送出（本頁已內建）。</p>
     </section>
   </main>
 
@@ -110,7 +104,6 @@
     const CONFIG = {
       WEBAPP_URL: 'https://script.google.com/macros/s/AKfycbx9ikfl1kVFhTlmzCFzdDFiMWFA1piSsyxCed4hTDXp2f40Qcqmhh3CDUXUEb7cYs5j/exec', // ← 換成你的 /exec
       SECRET: 'mys3cret123', // ← 與 GAS SECRET_TOKEN 一致
-      ALLOW_ADMIN_PANEL: false
     };
 
     // ==== 常數設定 ====
@@ -166,9 +159,6 @@
 
       $('#finish-btn').onclick = finishSurvey;
       $('#send-sheets').onclick = sendToSheets;
-      $('#download-participants').onclick = () => downloadCSV('participants.csv', buildParticipantsCSV());
-      $('#download-trials').onclick       = () => downloadCSV('trials.csv', buildTrialsCSV());
-      $('#download-surveys').onclick      = () => downloadCSV('surveys.csv', buildSurveysCSV());
     });
 
     function startExp(){
@@ -261,36 +251,14 @@
       s.preference = pref; s.open_feedback = $('#open-feedback').value.trim();
       surveys = [s];
       setActive('#survey-section', '#done-section');
-      $('#status').textContent = '已完成作答，尚未送出至試算表。';
-    }
-
-    // ==== 下載 CSV ====
-    function downloadCSV(filename, rows){
-      const csv = rows.map(r => r.map(v => String(v).includes(',') ? '"'+String(v).replace(/"/g,'""')+'"' : v).join(',')).join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
-    }
-    function buildParticipantsCSV(){
-      const header = ['pid','age','gender','order_seq','device','start_time'];
-      return [header, [participant.pid, participant.age, participant.gender, participant.order_seq, participant.device, participant.start_time]];
-    }
-    function buildTrialsCSV(){
-      const header = ['pid','trial_index','chart_type','task_id','response','correct_answer','accuracy','rt_ms'];
-      const rows = [header];
-      trials.forEach((t,i) => rows.push([participant.pid, i+1, t.chart, t.id, t.response, t.correct_answer, t.accuracy, t.rt_ms]));
-      return rows;
-    }
-    function buildSurveysCSV(){
-      const header = ['pid','s1_line','s2_line','s3_line','s4_line','s1_bar','s2_bar','s3_bar','s4_bar','s1_heat','s2_heat','s3_heat','s4_heat','preference','open_feedback'];
-      const s = surveys[0] || {}; return [header, header.map(k => s[k] ?? '')];
+      $('#status').textContent = '已完成作答，請按下方「送出作答」。';
     }
 
     // ==== 上傳至 Google 試算表（Apps Script Web App）====
     async function sendToSheets(){
       const url = CONFIG.WEBAPP_URL.trim();
       const secret = CONFIG.SECRET.trim();
-      if (!url) { alert('尚未設定 Web App URL'); return; }
+      if (!url) { alert('系統設定不完整：缺少 Web App URL'); return; }
 
       const payload = {
         secret,
@@ -309,14 +277,13 @@
         let json = {};
         try { json = JSON.parse(text); } catch(_) { json = { ok: res.ok, raw: text }; }
         if ((json && json.ok) || res.ok) {
-          const link = json.sheetUrl ? ` → <a href="${json.sheetUrl}" target="_blank">開啟試算表</a>` : '';
           const c = json.counts || {};
-          $('#status').innerHTML = `已送出到 Google 試算表。<span class="success">成功</span>${link}<br>寫入筆數：participants=${c.participants||0}, trials=${c.trials||0}, surveys=${c.surveys||0}`;
+          $('#status').innerHTML = `已送出作答，感謝參與！<br>（系統紀錄：participants=${c.participants||0}, trials=${c.trials||0}, surveys=${c.surveys||0}）`;
         } else {
           $('#status').textContent = '送出失敗：' + (json && json.message || text || '未知錯誤');
         }
       } catch (e) {
-        console.error(e); $('#status').textContent = '送出失敗（可能是 CORS 或權限）。錯誤：'+e.message;
+        console.error(e); $('#status').textContent = '送出失敗（可能是網路或權限）。錯誤：'+e.message;
       }
     }
   </script>
