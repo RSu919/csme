@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>圖表理解與使用感受問卷</title>
+  <style>
+    body { font-family: 'Microsoft JhengHei', sans-serif; margin: 0; background-color: #fafafa; color: #333; }
+    header { background: #f7b500; color: white; text-align: center; padding: 1em 0; }
+    #breadcrumb { font-size: 0.9em; color: #fff8e1; }
+    section { display: none; padding: 2em; max-width: 800px; margin: auto; background: white; border-radius: 12px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    section.active { display: block; }
+    label { display: block; margin-top: 1em; }
+    input, select, textarea, button { width: 100%; padding: 10px; margin-top: 5px; font-size: 1em; }
+    button { background-color: #f7b500; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    button:hover { background-color: #e09e00; }
+    #chart-area img { max-width: 100%; border-radius: 8px; cursor: zoom-in; }
+    progress { width: 100%; height: 20px; margin: 10px 0; }
+    .button-group { display: flex; justify-content: space-between; }
+    #slider-container { margin-top: 1em; text-align: center; }
+    #survey-forms { display: flex; flex-direction: column; gap: 1em; }
+    #survey-forms table { width: 100%; border-collapse: collapse; }
+    #survey-forms th, #survey-forms td { border: 1px solid #ddd; text-align: center; padding: 6px; }
+    #survey-forms th { background-color: #ffe082; }
+    #img-dialog img { max-width: 90vw; max-height: 90vh; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>圖表理解與使用感受問卷</h1>
+    <nav id="breadcrumb">資料 → 作答 → 問卷 → 下載</nav>
+  </header>
+
+  <main id="app">
+    <section id="participant-section" class="active">
+      <h2>參與者基本資料</h2>
+      <label>參與者編號（可留空自動產生）<input type="text" id="pid"></label>
+      <label>年齡 <input type="number" id="age" min="18" max="30" required></label>
+      <label>性別<select id="gender"><option value="">請選擇</option><option value="M">男性</option><option value="F">女性</option></select></label>
+      <button id="start-btn">開始實驗</button>
+    </section>
+
+    <section id="trial-section" class="hidden">
+      <h2 id="trial-title">題目 1 / 6</h2>
+      <progress id="progress" value="1" max="6"></progress>
+      <div id="chart-area"><img id="chart-image" src="" alt="chart"></div>
+      <p id="question-text"></p>
+      <input type="text" id="response" placeholder="請輸入答案">
+      <div id="slider-container" class="hidden"><input type="range" id="slider" min="80" max="160" value="120"><span id="slider-value">120</span></div>
+      <div class="button-group"><button id="prev-btn">上一題</button><button id="next-btn">下一題</button></div>
+    </section>
+
+    <section id="survey-section" class="hidden">
+      <h2>問卷調查</h2>
+      <div id="survey-forms"></div>
+      <label>最喜歡的圖表類型：<select id="preference"><option value="">請選擇</option><option value="line">折線圖</option><option value="bar">長條圖</option><option value="heat">熱點圖</option></select></label>
+      <label>其他意見：<textarea id="open-feedback"></textarea></label>
+      <button id="finish-btn">完成並下載結果</button>
+    </section>
+
+    <section id="download-section" class="hidden">
+      <h2>資料完成！</h2>
+      <button id="download-participants">下載 participants.csv</button>
+      <button id="download-trials">下載 trials.csv</button>
+      <button id="download-surveys">下載 surveys.csv</button>
+    </section>
+  </main>
+
+  <dialog id="img-dialog"><img id="dialog-img" src="" alt=""></dialog>
+
+  <script>
+    const LATIN_ORDERS = ['L-B-P','L-P-B','B-L-P','B-P-L','P-L-B','P-B-L'];
+    const TASKS = {
+      'L': [{id:'A',q:'哪一個月份案件數最多？',correct:'7月',type:'text'},{id:'A2',q:'請估計 2025/4 月案件數（±10 以內視為正確）',correct:120,type:'number'}],
+      'B': [{id:'C',q:'哪個網站排名第 1？',correct:'siteA',type:'text'},{id:'C2',q:'哪個網站排名第 3？',correct:'siteC',type:'text'}],
+      'P': [{id:'B2',q:'哪一類／哪一群體佔比最高？',correct:'假投資',type:'text'},{id:'C2',q:'第二高的佔比為？（填百分比，不含 %）',correct:25,type:'number'}]
+    };
+    const SURVEY_DIMENSIONS = ['易讀性','反應速度','信心程度','風險理解度'];
+    let participant={},trials=[],surveys=[],orderSeq='',trialIndex=0,startTime=null;
+
+    document.addEventListener('DOMContentLoaded',()=>{
+      q('#start-btn').onclick=startExperiment;
+      q('#next-btn').onclick=nextTrial;
+      q('#prev-btn').onclick=prevTrial;
+      q('#finish-btn').onclick=finishSurvey;
+      q('#slider').oninput=e=>q('#slider-value').textContent=e.target.value;
+      q('#chart-image').onclick=()=>{q('#dialog-img').src=q('#chart-image').src;q('#img-dialog').showModal();};
+      q('#img-dialog').onclick=()=>q('#img-dialog').close();
+      q('#download-participants').onclick=()=>downloadCSV('participants.csv',buildParticipantsCSV());
+      q('#download-trials').onclick=()=>downloadCSV('trials.csv',buildTrialsCSV());
+      q('#download-surveys').onclick=()=>downloadCSV('surveys.csv',buildSurveysCSV());
+    });
+    function q(s){return document.querySelector(s)}
+    function pickLatinSquareOrder(){return LATIN_ORDERS[Math.floor(Math.random()*LATIN_ORDERS.length)]}
+    function startExperiment(){const pid=q('#pid').value.trim()||generatePid(),age=q('#age').value,gender=q('#gender').value;if(!age||!gender){alert('請填寫年齡與性別');return;}orderSeq=pickLatinSquareOrder();participant={pid,age,gender,order_seq:orderSeq,device:navigator.userAgent,start_time:new Date().toISOString()};switchSection('#participant-section','#trial-section');startTrials();}
+    function generatePid(){let n=localStorage.getItem('pidCount')||0;n++;localStorage.setItem('pidCount',n);return 'P'+String(n).padStart(2,'0');}
+    function startTrials(){const seq=orderSeq.split('-');let all=[];seq.forEach(c=>TASKS[c].forEach(t=>all.push({chart:c,...t})));trials=all;trialIndex=0;showTrial();}
+    function showTrial(){const t=trials[trialIndex];q('#trial-title').textContent=`題目 ${trialIndex+1}/6`;q('#progress').value=trialIndex+1;q('#question-text').textContent=t.q;q('#response').value='';q('#slider-container').classList.toggle('hidden',t.id!=='A2');q('#chart-image').src=getChartSrc(t.chart);startTime=Date.now();}
+    function getChartSrc(c){return c==='L'?'assets/line_trend_1920x1080b.png':c==='B'?'assets/bar_top10_1920x1080b.png':'assets/heat_month_1920x1080b.png'}
+    function nextTrial(){const t=trials[trialIndex];const resp=t.id==='A2'?q('#slider').value:q('#response').value.trim();if(!resp){alert('請輸入答案');return;}const rt=Date.now()-startTime;const {correctAnswer,accuracy}=scoreResponse(t.chart,t.id,resp);Object.assign(t,{response:resp,correct_answer:correctAnswer,accuracy,rt_ms:rt});if(trialIndex<trials.length-1){trialIndex++;showTrial();}else switchSection('#trial-section','#survey-section',showSurvey);}
+    function prevTrial(){if(trialIndex>0){trialIndex--;showTrial();}}
+    function scoreResponse(c,id,u){let corr='',acc=0;for(const t of TASKS[c])if(t.id===id){corr=t.correct;if(t.type==='number'){const val=parseFloat(u);acc=id==='A2'&&Math.abs(val-t.correct)<=10?1:val===t.correct?1:0;}else{const a=u.replace(/\s/g,'').toLowerCase(),b=String(t.correct).replace(/\s/g,'').toLowerCase();acc=a===b?1:0;}break;}return{correctAnswer:corr,accuracy:acc}}
+    function showSurvey(){const d=q('#survey-forms');d.innerHTML='';['line','bar','heat'].forEach(type=>{let tbl='<table><tr><th colspan=6>'+type.toUpperCase()+' 圖表評分</th></tr><tr><th>構面</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr>';SURVEY_DIMENSIONS.forEach((s,i)=>{tbl+='<tr><td>'+s+'</td>'+[1,2,3,4,5].map(v=>`<td><input type='radio' name='${type}_${i+1}' value='${v}'></td>`).join('')+'</tr>';});tbl+='</table>';d.innerHTML+=tbl;});}
+    function finishSurvey(){const pref=q('#preference').value;if(!pref){alert('請選擇偏好圖表類型');return;}const fb=q('#open-feedback').value.trim();const s={pid:participant.pid};['line','bar','heat'].forEach(t=>{for(let i=1;i<=4;i++){const n=`${t}_${i}`;const v=document.querySelector(`input[name='${n}']:checked`);if(!v){alert('請完成所有評分');return;}s[`s${i}_${t}`]=v.value;}});s.preference=pref;s.open_feedback=fb;surveys.push(s);switchSection('#survey-section','#download-section');}
+    function switchSection(h1,h2,cb){document.querySelector(h1).classList.remove('active');document.querySelector(h2).classList.add('active');if(cb)cb();}
+    function downloadCSV(fn,rows){let csv=rows.map(r=>r.join(',')).join('\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fn;a.click();}
+    function buildParticipantsCSV(){const h=['pid','age','gender','order_seq','device','start_time'];return [h,Object.values(participant)];}
+    function buildTrialsCSV(){const h=['pid','trial_index','chart_type','task_id','response','correct_answer','accuracy','rt_ms'];const rows=[h];trials.forEach((t,i)=>rows.push([participant.pid,i+1,t.chart,t.id,t.response,t.correct_answer,t.accuracy,t.rt_ms]));return rows;}
+    function buildSurveysCSV(){const h=['pid','s1_line','s2_line','s3_line','s4_line','s1_bar','s2_bar','s3_bar','s4_bar','s1_heat','s2_heat','s3_heat','s4_heat','preference','open_feedback'];const s=surveys[0];return [h,h.map(x=>s[x]||'')];}
+  </script>
+</body>
+</html>
