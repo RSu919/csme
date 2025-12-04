@@ -33,375 +33,279 @@
     dialog img { max-width:90vw; max-height:90vh }
   </style>
 </head>
-
 <body>
-<header>
-  <h1>防詐數據視覺化體驗平台</h1>
-  <nav id="breadcrumb">資料 → 作答 → 問卷 → 送出</nav>
-</header>
-
-<main>
-
-  <!-- ==== 1) 參與者資料 ==== -->
-  <section id="conf-section" class="active">
-    <h2>1) 目標與資料授權</h2>
-    <p class="callout">此頁面會在本機紀錄你的作答，完成後由系統送到研究團隊的試算表。送出後不會收集個資，僅包含你輸入的 pid、年齡、性別與作答內容。</p>
-    <div class="row">
-      <label>（可留空自動產生）參與者編號 pid<input id="pid" placeholder="例如：P01" /></label>
-      <label>年齡<input id="age" type="number" min="18" max="99" /></label>
-    </div>
-    <div class="row">
-      <label>性別
-        <select id="gender">
-          <option value="">請選擇</option>
-          <option value="M">男性</option>
-          <option value="F">女性</option>
-        </select>
-      </label>
-      <label class="muted">裝置資訊（自動偵測）<input id="device" disabled /></label>
-    </div>
-    <button id="start-btn">我了解並開始</button>
-  </section>
-
-  <!-- ==== 2) 題目作答 ==== -->
-  <section id="trial-section">
-    <h2 id="trial-title">2) 題目 1 / 6</h2>
-    <progress id="progress" value="1" max="6"></progress>
-    <div id="chart-area"><img id="chart-image" alt="chart" /></div>
-    <p id="question-text"></p>
-    <input id="response" placeholder="請輸入答案" />
-    <div id="slider-wrap"><input type="range" id="slider" min="80" max="160" value="120" /><span id="slider-value">120</span></div>
-    <div class="button-row">
-      <button id="prev-btn">上一題</button>
-      <button id="next-btn">下一題</button>
-    </div>
-  </section>
-
-  <!-- ==== 3) 主觀問卷 ==== -->
-  <section id="survey-section">
-    <h2>3) 主觀問卷</h2>
-    <div id="survey-forms"></div>
-
-    <div class="row">
-      <label>最偏好圖表類型
-        <select id="preference">
-          <option value="">請選擇</option>
-          <option value="line">折線圖</option>
-          <option value="bar">長條圖</option>
-          <option value="heat">熱點圖</option>
-        </select>
-      </label>
-      <label>其他意見<textarea id="open-feedback" placeholder="（選填）"></textarea></label>
-    </div>
-
-    <button id="finish-btn">完成</button>
-  </section>
-
-  <!-- ==== 4) 送出 ==== -->
-  <section id="done-section">
-    <h2>4) 送出</h2>
-    <p id="status" class="muted">尚未送出</p>
-    <div class="row">
-      <button id="send-sheets">送出作答</button>
-      <button id="restart-btn" style="display:none; background:#666">重新作答</button>
-    </div>
-  </section>
-</main>
-
-<dialog id="img-dialog"><img id="dialog-img" /></dialog>
-
-<script>
-/* ===================
-   常數設定與題目題庫
-   =================== */
-const CONFIG = {
-  WEBAPP_URL: 'https://script.google.com/macros/s/AKfycbx9ikfl1kVFhTlmzCFzdDFiMWFA1piSsyxCed4hTDXp2f40Qcqmhh3CDUXUEb7cYs5j/exec',
-  SECRET: 'mys3cret123',
-};
-
-const LATIN_ORDERS = ['L-B-P','L-P-B','B-L-P','B-P-L','P-L-B','P-B-L'];
-
-const TASKS = {
-  'L': [
-    { id:'A',  q:'哪一個月份案件數最多？', correct:'7月', type:'text' },
-    { id:'A2', q:'請估計 2025/4 月案件數（±10 以內視為正確）', correct:120, type:'number' }
-  ],
-  'B': [
-    { id:'C',  q:'哪個網站排名第 1？', correct:'siteA', type:'text' },
-    { id:'C2', q:'哪個網站排名第 3？', correct:'siteC', type:'text' }
-  ],
-  'P': [
-    { id:'B2', q:'哪一類／哪一群體佔比最高？', correct:'假投資', type:'text' },
-    { id:'C2', q:'第二高的佔比為？（填百分比，不含 %）', correct:25, type:'number' }
-  ]
-};
-
-const SURVEY_DIMENSIONS = ['易讀性','反應速度','信心程度','風險理解度'];
-
-/* ===================
-   狀態變數
-   =================== */
-let participant = {};        
-let trials = [];             
-let surveys = [];            
-let orderSeq = '';
-let tIndex = 0;              
-let tStartAt = 0;            
-let hasSubmitted = false;    
-
-/* ===================
-   工具
-   =================== */
-const $ = s => document.querySelector(s);
-
-/* ===================
-   主流程
-   =================== */
-
-document.addEventListener('DOMContentLoaded', () => {
-  $('#device').value = navigator.userAgent;
-  $('#start-btn').onclick = startExp;
-  $('#next-btn').onclick  = nextTrial;
-  $('#prev-btn').onclick  = () => { if (tIndex>0) { tIndex--; showTrial(); } };
-  $('#slider').oninput    = e => $('#slider-value').textContent = e.target.value;
-
-  $('#chart-image').onclick = () => { $('#dialog-img').src = $('#chart-image').src; $('#img-dialog').showModal(); };
-  $('#img-dialog').onclick   = () => $('#img-dialog').close();
-
-  $('#finish-btn').onclick = finishSurvey;
-  $('#send-sheets').onclick = sendToSheets;
-});
-
-/* ====== 1) 開始實驗 ====== */
-function startExp(){
-  const pid = ($('#pid').value.trim() || genPid());
-  const age = $('#age').value.trim();
-  const gender = $('#gender').value;
-  if (!age || !gender) { alert('請填寫年齡與性別'); return; }
-
-  orderSeq = LATIN_ORDERS[Math.floor(Math.random()*LATIN_ORDERS.length)];
-  participant = {
-    pid, age, gender,
-    order_seq: orderSeq,
-    device: navigator.userAgent,
-    start_time: new Date().toISOString()
-  };
-
-  setActive('#conf-section', '#trial-section');
-  startTrials();
-}
-
-/* ====== 2) 題目呈現 ====== */
-function startTrials(){
-  const seq = orderSeq.split('-');
-  const all = [];
-  seq.forEach(c => TASKS[c].forEach(t => all.push({ chart:c, ...t })));
-  trials = all.slice(0,6);
-  tIndex = 0;
-  showTrial();
-}
-
-function showTrial(){
-  const t = trials[tIndex];
-  $('#trial-title').textContent = `2) 題目 ${tIndex+1} / ${trials.length}`;
-  $('#progress').value = tIndex+1;
-
-  $('#chart-image').src =
-    t.chart==='L' ? 'assets/line_trend_1920x1080b.png' :
-    t.chart==='B' ? 'assets/bar_top10_1920x1080b.png' :
-                    'assets/heat_month_1920x1080b.png';
-
-  $('#question-text').textContent = t.q;
-  $('#response').value = '';
-
-  const sliderOn = (t.id === 'A2');
-  $('#slider-wrap').style.display = sliderOn ? 'grid' : 'none';
-  $('#slider').value = 120; 
-  $('#slider-value').textContent = '120';
-
-  tStartAt = Date.now();
-}
-
-/* ====== 作答與計分 ====== */
-function nextTrial(){
-  const t = trials[tIndex];
-  const resp = (t.id==='A2') ? $('#slider').value : $('#response').value.trim();
-  if (!resp) { alert('請輸入答案'); return; }
-
-  const rt = Date.now() - tStartAt;
-  const sc = score(t.chart, t.id, resp);
-  Object.assign(t, { response: resp, ...sc, rt_ms: rt });
-
-  if (tIndex < trials.length-1) {
-    tIndex++; 
-    showTrial();
-  } else {
-    setActive('#trial-section', '#survey-section');
-    buildSurvey();
-  }
-}
-
-function score(chart, id, input){
-  const bank = TASKS[chart].find(x => x.id===id);
-  const correct = bank.correct;
-  let acc = 0;
-
-  if (bank.type === 'number') {
-    const val = parseFloat(input);
-    if (id==='A2') acc = Math.abs(val - correct) <= 10 ? 1 : 0;
-    else acc = (val === correct) ? 1 : 0;
-  } else {
-    const a = String(input).replace(/\s/g,'').toLowerCase();
-    const b = String(correct).replace(/\s/g,'').toLowerCase();
-    acc = (a === b) ? 1 : 0;
-  }
-  return { correct_answer: correct, accuracy: acc };
-}
-
-/* ============================
-   ★ 3) 主觀問卷畫面（已加入圖表）
-   ============================ */
-function buildSurvey(){
-  const host = $('#survey-forms'); 
-  host.innerHTML = '';
-
-  const chartImages = {
-    line: 'assets/line_trend_1920x1080b.png',
-    bar:  'assets/bar_top10_1920x1080b.png',
-    heat: 'assets/heat_month_1920x1080b.png'
-  };
-
-  ['line','bar','heat'].forEach(type => {
-
-    /* ★ 新增：顯示該圖表的圖片 */
-    host.insertAdjacentHTML('beforeend', `
-      <div style="text-align:center; margin:20px 0;">
-        <img src="${chartImages[type]}" 
-             style="max-width:80%; border-radius:10px; border:1px solid #ccc; margin-bottom:12px;">
+  <header>
+    <h1>防詐數據視覺化體驗平台</h1>
+    <nav id="breadcrumb">資料 → 作答 → 問卷 → 送出</nav>
+  </header>
+  <main>
+    <section id="conf-section" class="active">
+      <h2>1) 目標與資料授權</h2>
+      <p class="callout">此頁面會在本機紀錄你的作答，完成後由系統送到研究團隊的試算表。送出後不會收集個資，僅包含你輸入的 pid、年齡、性別與作答內容。</p>
+      <div class="row">
+        <label>（可留空自動產生）參與者編號 pid<input id="pid" placeholder="例如：P01" /></label>
+        <label>年齡<input id="age" type="number" min="18" max="99" /></label>
       </div>
-    `);
+      <div class="row">
+        <label>性別
+          <select id="gender">
+            <option value="">請選擇</option>
+            <option value="M">男性</option>
+            <option value="F">女性</option>
+          </select>
+        </label>
+        <label class="muted">裝置資訊（自動偵測）<input id="device" disabled /></label>
+      </div>
+      <button id="start-btn">我了解並開始</button>
+    </section>
 
-    /* 原本評分表格 */
-    let html = `<table>
-      <tr><th colspan="6">${type.toUpperCase()} 圖表評分</th></tr>
-      <tr><th>構面</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr>
-    `;
+    <section id="trial-section">
+      <h2 id="trial-title">2) 題目 1 / 6</h2>
+      <progress id="progress" value="1" max="6"></progress>
+      <div id="chart-area"><img id="chart-image" alt="chart" /></div>
+      <p id="question-text"></p>
+      <input id="response" placeholder="請輸入答案" />
+      <div id="slider-wrap"><input type="range" id="slider" min="80" max="160" value="120" /><span id="slider-value">120</span></div>
+      <div class="button-row">
+        <button id="prev-btn">上一題</button>
+        <button id="next-btn">下一題</button>
+      </div>
+    </section>
 
-    SURVEY_DIMENSIONS.forEach((d,i) => {
-      html += `<tr><td>${d}</td>` +
-              [1,2,3,4,5].map(v =>
-                `<td><input type="radio" name="${type}_${i+1}" value="${v}"></td>`
-              ).join('') +
-              '</tr>';
+    <section id="survey-section">
+      <h2>3) 主觀問卷</h2>
+      <div id="survey-forms"></div>
+      <div class="row">
+        <label>最偏好圖表類型
+          <select id="preference">
+            <option value="">請選擇</option>
+            <option value="line">折線圖</option>
+            <option value="bar">長條圖</option>
+            <option value="heat">熱點圖</option>
+          </select>
+        </label>
+        <label>其他意見<textarea id="open-feedback" placeholder="（選填）"></textarea></label>
+      </div>
+      <button id="finish-btn">完成</button>
+    </section>
+
+    <section id="done-section">
+      <h2>4) 送出</h2>
+      <p id="status" class="muted">尚未送出</p>
+      <div class="row">
+        <button id="send-sheets">送出作答</button>
+        <button id="restart-btn" style="display:none; background:#666">重新作答</button>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="img-dialog"><img id="dialog-img" /></dialog>
+
+  <script>
+    // ====== 管理者常數設定（不顯示給受試者）======
+    const CONFIG = {
+      WEBAPP_URL: 'https://script.google.com/macros/s/AKfycbx9ikfl1kVFhTlmzCFzdDFiMWFA1piSsyxCed4hTDXp2f40Qcqmhh3CDUXUEb7cYs5j/exec', // ← 換成你的 /exec
+      SECRET: 'mys3cret123', // ← 與 GAS SECRET_TOKEN 一致
+    };
+
+    // ==== 常數設定 ====
+    const LATIN_ORDERS = ['L-B-P','L-P-B','B-L-P','B-P-L','P-L-B','P-B-L'];
+    const TASKS = {
+      'L': [
+        { id:'A',  q:'哪一個月份案件數最多？', correct:'7月', type:'text' },
+        { id:'A2', q:'請估計 2025/4 月案件數（±10 以內視為正確）', correct:120, type:'number' }
+      ],
+      'B': [
+        { id:'C',  q:'哪個網站排名第 1？', correct:'siteA', type:'text' },
+        { id:'C2', q:'哪個網站排名第 3？', correct:'siteC', type:'text' }
+      ],
+      'P': [
+        { id:'B2', q:'哪一類／哪一群體佔比最高？', correct:'假投資', type:'text' },
+        { id:'C2', q:'第二高的佔比為？（填百分比，不含 %）', correct:25, type:'number' }
+      ]
+    };
+    const SURVEY_DIMENSIONS = ['易讀性','反應速度','信心程度','風險理解度'];
+
+    // ==== 狀態 ====
+    let participant = {};        // 單筆
+    let trials = [];             // 6 題
+    let surveys = [];            // 單筆
+    let orderSeq = '';
+    let tIndex = 0;              // 0..5
+    let tStartAt = 0;            // 題目開始時間戳
+    let hasSubmitted = false;    // ★ 防止重複上傳
+
+    // ==== 工具 ====
+    const $ = s => document.querySelector(s);
+    const setActive = (hideSel, showSel) => { if (hideSel) $(hideSel).classList.remove('active'); if (showSel) $(showSel).classList.add('active'); };
+    const deviceText = () => {
+      const ua = navigator.userAgent;
+      const plat = navigator.platform || '';
+      if (ua.includes('Chrome')) return `Chrome on ${plat}`;
+      if (ua.includes('Safari')) return `Safari on ${plat}`;
+      if (ua.includes('Edg'))    return `Edge on ${plat}`;
+      return plat || ua;
+    };
+    const genPid = () => {
+      let n = +(localStorage.getItem('pidCount')||0)+1; localStorage.setItem('pidCount', n); return `P${String(n).padStart(2,'0')}`;
+    };
+
+    // ==== 初始 ====
+    document.addEventListener('DOMContentLoaded', () => {
+      $('#device').value = deviceText();
+      $('#start-btn').onclick = startExp;
+      $('#next-btn').onclick  = nextTrial;
+      $('#prev-btn').onclick  = () => { if (tIndex>0) { tIndex--; showTrial(); } };
+      $('#slider').oninput    = e => $('#slider-value').textContent = e.target.value;
+      $('#chart-image').onclick = () => { $('#dialog-img').src = $('#chart-image').src; $('#img-dialog').showModal(); };
+      $('#img-dialog').onclick   = () => $('#img-dialog').close();
+
+      $('#finish-btn').onclick = finishSurvey;
+      $('#send-sheets').onclick = sendToSheets;
+      $('#restart-btn').onclick = () => { location.reload(); };
     });
 
-    html += '</table>';
-    host.insertAdjacentHTML('beforeend', html);
-  });
-}
-
-/* ====== 主觀問卷送出 ====== */
-function finishSurvey(){
-  const pref = $('#preference').value; 
-  if (!pref) { alert('請選擇偏好圖表類型'); return; }
-
-  const s = { pid: participant.pid };
-  for (const type of ['line','bar','heat']) {
-    for (let i=1;i<=4;i++) {
-      const el = document.querySelector(`input[name="${type}_${i}"]:checked`);
-      if (!el) { alert('請完成所有評分'); return; }
-      s[`s${i}_${type}`] = +el.value;
+    function startExp(){
+      const pid = ($('#pid').value.trim() || genPid());
+      const age = $('#age').value.trim();
+      const gender = $('#gender').value;
+      if (!age || !gender) { alert('請填寫年齡與性別'); return; }
+      orderSeq = LATIN_ORDERS[Math.floor(Math.random()*LATIN_ORDERS.length)];
+      participant = {
+        pid, age, gender,
+        order_seq: orderSeq,
+        device: deviceText(),
+        start_time: new Date().toISOString()
+      };
+      setActive('#conf-section', '#trial-section');
+      startTrials();
     }
-  }
-  s.preference = pref;
-  s.open_feedback = $('#open-feedback').value.trim();
 
-  surveys = [s];
-
-  setActive('#survey-section', '#done-section');
-  $('#status').textContent = '已完成作答，請按下方「送出作答」。';
-}
-
-/* ====== 上傳到試算表 ====== */
-async function sendToSheets(){
-  if (hasSubmitted) return;
-  
-  const btn = $('#send-sheets');
-  btn.disabled = true;
-  btn.textContent = '傳送中…';
-
-  const payload = {
-    secret: CONFIG.SECRET,
-    origin: window.location.origin,
-    participants: [{
-      pid: participant.pid,
-      age: +participant.age,
-      gender: participant.gender,
-      order_seq: participant.order_seq,
-      device: participant.device,
-      start_time: participant.start_time
-    }],
-    trials: trials.map((t,i)=>({
-      pid: participant.pid,
-      trial_index: i+1,
-      chart_type: t.chart,
-      task_id: t.id,
-      response: t.response,
-      correct_answer: t.correct_answer,
-      accuracy: t.accuracy,
-      rt_ms: t.rt_ms
-    })),
-    surveys: surveys
-  };
-
-  try {
-    const fd = new FormData();
-    fd.append('payload', JSON.stringify(payload));
-    const res = await fetch(CONFIG.WEBAPP_URL, { method:'POST', body: fd });
-    const text = await res.text();
-
-    let json = {};
-    try { json = JSON.parse(text); } catch { json = { ok: res.ok, raw: text }; }
-
-    if ((json && json.ok) || res.ok) {
-      hasSubmitted = true;
-      btn.textContent = '已送出（完成）';
-      $('#restart-btn').style.display = 'block';
-
-      const c = json.counts || {};
-      $('#status').innerHTML =
-        `已送出作答，感謝參與！<br>（系統紀錄：participants=${c.participants||0}, trials=${c.trials||0}, surveys=${c.surveys||0}）`;
-
-    } else {
-      btn.disabled = false;
-      btn.textContent = '送出作答';
-      $('#status').textContent = '送出失敗：' + (json.message || text);
+    function startTrials(){
+      const seq = orderSeq.split('-');
+      const all = [];
+      seq.forEach(c => TASKS[c].forEach(t => all.push({ chart:c, ...t })));
+      trials = all.slice(0,6); // 保證 6 題
+      tIndex = 0;
+      showTrial();
     }
-  } catch (e) {
-    btn.disabled = false;
-    btn.textContent = '送出作答';
-    $('#status').textContent = '送出失敗：' + e.message;
-  }
-}
 
-/* ===================
-   小工具
-   =================== */
-function genPid(){
-  let n = +(localStorage.getItem('pidCount')||0)+1;
-  localStorage.setItem('pidCount', n);
-  return `P${String(n).padStart(2,'0')}`;
-}
+    function showTrial(){
+      const t = trials[tIndex];
+      $('#trial-title').textContent = `2) 題目 ${tIndex+1} / ${trials.length}`;
+      $('#progress').value = tIndex+1;
+      $('#chart-image').src = t.chart==='L' ? 'assets/line_trend_1920x1080b.png' : (t.chart==='B' ? 'assets/bar_top10_1920x1080b.png' : 'assets/heat_month_1920x1080b.png');
+      $('#question-text').textContent = t.q;
+      $('#response').value = '';
+      const sliderOn = (t.id==='A2');
+      $('#slider-wrap').style.display = sliderOn ? 'grid' : 'none';
+      $('#slider').value = 120; $('#slider-value').textContent = '120';
+      tStartAt = Date.now();
+    }
 
-function setActive(hideSel, showSel){
-  if (hideSel) $(hideSel).classList.remove('active');
-  if (showSel) $(showSel).classList.add('active');
-}
+    function score(chart, id, input){
+      const bank = TASKS[chart].find(x => x.id===id);
+      const correct = bank.correct;
+      let acc = 0;
+      if (bank.type === 'number') {
+        const val = parseFloat(input);
+        if (id==='A2') acc = Math.abs(val - correct) <= 10 ? 1 : 0; else acc = (val === correct) ? 1 : 0;
+      } else {
+        const a = String(input).replace(/\s/g,'').toLowerCase();
+        const b = String(correct).replace(/\s/g,'').toLowerCase();
+        acc = (a===b) ? 1 : 0;
+      }
+      return { correct_answer: correct, accuracy: acc };
+    }
 
-</script>
+    function nextTrial(){
+      const t = trials[tIndex];
+      const resp = (t.id==='A2') ? $('#slider').value : $('#response').value.trim();
+      if (!resp) { alert('請輸入答案'); return; }
+      const rt = Date.now() - tStartAt;
+      const sc = score(t.chart, t.id, resp);
+      Object.assign(t, { response: resp, ...sc, rt_ms: rt });
+      if (tIndex < trials.length-1) { tIndex++; showTrial(); }
+      else { setActive('#trial-section', '#survey-section'); buildSurvey(); }
+    }
 
+    function buildSurvey(){
+      const host = $('#survey-forms'); host.innerHTML = '';
+      ['line','bar','heat'].forEach(type => {
+        let html = `<table><tr><th colspan="6">${type.toUpperCase()} 圖表評分</th></tr>`;
+        html += '<tr><th>構面</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr>';
+        SURVEY_DIMENSIONS.forEach((d,i) => {
+          html += `<tr><td>${d}</td>` + [1,2,3,4,5].map(v => `<td><input type="radio" name="${type}_${i+1}" value="${v}"></td>`).join('') + '</tr>';
+        });
+        html += '</table>';
+        host.insertAdjacentHTML('beforeend', html);
+      });
+    }
+
+    function finishSurvey(){
+      const pref = $('#preference').value; if (!pref) { alert('請選擇偏好圖表類型'); return; }
+      const s = { pid: participant.pid };
+      for (const type of ['line','bar','heat']) {
+        for (let i=1;i<=4;i++) {
+          const el = document.querySelector(`input[name="${type}_${i}"]:checked`);
+          if (!el) { alert('請完成所有評分'); return; }
+          s[`s${i}_${type}`] = +el.value;
+        }
+      }
+      s.preference = pref; s.open_feedback = $('#open-feedback').value.trim();
+      surveys = [s];
+      setActive('#survey-section', '#done-section');
+      $('#status').textContent = '已完成作答，請按下方「送出作答」。';
+    }
+
+    // ==== 上傳至 Google 試算表（Apps Script Web App）====
+    async function sendToSheets(){
+      if (hasSubmitted) return;          // ★ 已送出就不再重送
+      const btn = $('#send-sheets');
+      btn.disabled = true;               // ★ 立刻禁用，避免連點
+      btn.textContent = '傳送中…';
+
+      const url = CONFIG.WEBAPP_URL.trim();
+      const secret = CONFIG.SECRET.trim();
+      if (!url) { alert('系統設定不完整：缺少 Web App URL'); btn.disabled=false; btn.textContent='送出作答'; return; }
+
+      const payload = {
+        secret,
+        origin: window.location.origin,
+        participants: [{ pid:participant.pid, age:+participant.age, gender:participant.gender, order_seq:participant.order_seq, device:participant.device, start_time:participant.start_time }],
+        trials: trials.map((t,i)=>({ pid:participant.pid, trial_index:i+1, chart_type:t.chart, task_id:t.id, response:t.response, correct_answer:t.correct_answer, accuracy:t.accuracy, rt_ms:t.rt_ms })),
+        surveys: surveys
+      };
+
+      try {
+        $('#status').textContent = '傳送中…';
+        const fd = new FormData();
+        fd.append('payload', JSON.stringify(payload));
+        const res = await fetch(url, { method:'POST', body: fd });
+        const text = await res.text();
+        let json = {};
+        try { json = JSON.parse(text); } catch(_) { json = { ok: res.ok, raw: text }; }
+        if ((json && json.ok) || res.ok) {
+          const c = json.counts || {};
+          hasSubmitted = true;                                 // ★ 標記已送出
+          btn.textContent = '已送出（完成）';                  // ★ 改成完成
+          $('#restart-btn').style.display = 'block';           // ★ 顯示重新作答
+          $('#status').innerHTML = `已送出作答，感謝參與！<br>（系統紀錄：participants=${c.participants||0}, trials=${c.trials||0}, surveys=${c.surveys||0}）`;
+        } else {
+          btn.disabled = false;                                // 還原讓受試者可再試
+          btn.textContent = '送出作答';
+          $('#status').textContent = '送出失敗：' + (json && json.message || text || '未知錯誤');
+        }
+      } catch (e) {
+        btn.disabled = false;                                  // 還原
+        btn.textContent = '送出作答';
+        console.error(e); $('#status').textContent = '送出失敗（可能是網路或權限）。錯誤：'+e.message;
+      }
+    }
+  </script>
 </body>
 </html>
+
 
 
 
